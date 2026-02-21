@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amtrak Auto Train Delay Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; padding: 20px; }
+        h1 { text-align: center; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 24px; }
+        .train-section { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .train-section h2 { margin-bottom: 16px; }
+        .stats { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+        .stat-card { flex: 1; min-width: 140px; padding: 12px; border-radius: 6px; text-align: center; }
+        .stat-card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8; }
+        .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+        .green { background: #e8f5e9; color: #2e7d32; }
+        .yellow { background: #fff8e1; color: #f57f17; }
+        .red { background: #ffebee; color: #c62828; }
+        .neutral { background: #e3f2fd; color: #1565c0; }
+        .chart-container { position: relative; height: 300px; }
+        .no-data { text-align: center; color: #999; padding: 40px; }
+        @media (max-width: 600px) { .stats { flex-direction: column; } .chart-container { height: 250px; } }
+    </style>
+</head>
+<body>
+    <h1>Amtrak Auto Train Delays</h1>
+    <p class="subtitle">Train 53 (Southbound: Lorton &rarr; Sanford) &amp; Train 52 (Northbound: Sanford &rarr; Lorton)</p>
+
+    <div id="train-53" class="train-section">
+        <h2>Train 53 &mdash; Southbound (LOR &rarr; SFA)</h2>
+        <div class="stats" id="stats-53"></div>
+        <div class="chart-container"><canvas id="chart-53"></canvas></div>
+    </div>
+
+    <div id="train-52" class="train-section">
+        <h2>Train 52 &mdash; Northbound (SFA &rarr; LOR)</h2>
+        <div class="stats" id="stats-52"></div>
+        <div class="chart-container"><canvas id="chart-52"></canvas></div>
+    </div>
+
+    <script>
+        const TRAINS = {
+            53: { dest: 'SFA', chartId: 'chart-53', statsId: 'stats-53' },
+            52: { dest: 'LOR', chartId: 'chart-52', statsId: 'stats-52' },
+        };
+
+        function delayColor(mins) {
+            if (mins <= 0) return 'green';
+            if (mins < 15) return 'yellow';
+            return 'red';
+        }
+
+        function renderStats(containerId, delays) {
+            const container = document.getElementById(containerId);
+            if (!delays.length) {
+                container.innerHTML = '<p class="no-data">No data yet</p>';
+                return;
+            }
+            const avg = delays.reduce((a, b) => a + b, 0) / delays.length;
+            const worst = Math.max(...delays);
+            const onTime = delays.filter(d => d <= 0).length;
+            const onTimePct = ((onTime / delays.length) * 100).toFixed(0);
+
+            container.innerHTML = `
+                <div class="stat-card neutral">
+                    <div class="label">Trips Tracked</div>
+                    <div class="value">${delays.length}</div>
+                </div>
+                <div class="stat-card ${delayColor(avg)}">
+                    <div class="label">Avg Arrival Delay</div>
+                    <div class="value">${avg >= 0 ? '+' : ''}${Math.round(avg)} min</div>
+                </div>
+                <div class="stat-card ${delayColor(worst)}">
+                    <div class="label">Worst Delay</div>
+                    <div class="value">+${worst} min</div>
+                </div>
+                <div class="stat-card ${parseInt(onTimePct) >= 80 ? 'green' : parseInt(onTimePct) >= 50 ? 'yellow' : 'red'}">
+                    <div class="label">On-Time %</div>
+                    <div class="value">${onTimePct}%</div>
+                </div>
+            `;
+        }
+
+        function renderChart(canvasId, labels, arrDelays, depDelays) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            if (!labels.length) {
+                ctx.font = '16px sans-serif';
+                ctx.fillStyle = '#999';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data yet — run the script to collect data', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Arrival Delay (min)',
+                            data: arrDelays,
+                            borderColor: '#1565c0',
+                            backgroundColor: 'rgba(21,101,192,0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                        },
+                        {
+                            label: 'Departure Delay (min)',
+                            data: depDelays,
+                            borderColor: '#f57f17',
+                            backgroundColor: 'rgba(245,127,23,0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y} min`,
+                            },
+                        },
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: 'Delay (minutes)' },
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                        },
+                        x: {
+                            title: { display: true, text: 'Date' },
+                            grid: { display: false },
+                        },
+                    },
+                },
+            });
+        }
+
+        // Load and process CSV
+        Papa.parse('auto_train_status.csv', {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            complete(results) {
+                const rows = results.data;
+
+                for (const [trainNum, cfg] of Object.entries(TRAINS)) {
+                    // Filter to destination station rows for this train (arrival delay at destination is what matters)
+                    const trainRows = rows
+                        .filter(r => String(r.train_num) === String(trainNum) && r.station === cfg.dest && r.arrival_delay_mins !== '')
+                        .sort((a, b) => a.date.localeCompare(b.date));
+
+                    const labels = trainRows.map(r => r.date);
+                    const arrDelays = trainRows.map(r => parseInt(r.arrival_delay_mins, 10));
+                    const depDelays = trainRows.map(r => r.departure_delay_mins !== '' ? parseInt(r.departure_delay_mins, 10) : null);
+
+                    renderStats(cfg.statsId, arrDelays);
+                    renderChart(cfg.chartId, labels, arrDelays, depDelays);
+                }
+            },
+            error(err) {
+                document.querySelectorAll('.stats').forEach(el => {
+                    el.innerHTML = '<p class="no-data">Could not load CSV. Make sure to serve this page via a web server (e.g. python -m http.server).</p>';
+                });
+            },
+        });
+    </script>
+</body>
+</html>
