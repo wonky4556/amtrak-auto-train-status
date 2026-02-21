@@ -2,8 +2,8 @@ name: Daily Train Status
 
 on:
   schedule:
-    # 2 PM UTC = ~9-10 AM ET, after trains typically arrive
-    - cron: '0 14 * * *'
+    # Every 2 hours from 9 AM–2 PM ET (14:00–19:00 UTC) to capture delays
+    - cron: '0 14,16,18 * * *'
   workflow_dispatch:
 
 jobs:
